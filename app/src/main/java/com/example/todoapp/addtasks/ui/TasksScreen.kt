@@ -18,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -26,16 +27,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.todoapp.addtasks.ui.model.TaskModel
 
 @Composable
@@ -44,26 +49,51 @@ fun TasksScreen(tasksViewModel: TasksViewModel) {
     //VIDEO #112: Añadiendo y configurando el diálogo
     val showDialog: Boolean by tasksViewModel.showDialog.observeAsState(false)
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        AddTasksDialog(
-            show = showDialog,
-            onDismiss = { tasksViewModel.onDialogClose() },
-            onTaskAdded = { tasksViewModel.onTasksCreated(it) })
+    /* VIDEO 120: Conectando StateFlow con Screen (MIN 3:30)
+        * Vamos a crear un ciclo de vida de la screen */
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val uiState by produceState<TasksUiState>(
+        initialValue = TasksUiState.Loading,
+        key1 = lifecycle,
+        key2 = tasksViewModel
+    ) {
+        lifecycle.repeatOnLifecycle(state = Lifecycle.State.STARTED) {
+            //Aquí realizamos el collect necesario para recibir la información emitida del Flow
+            tasksViewModel.uiState.collect{ value = it }
+        }
+    }
 
-        //Recordar que si quiero usar un atributo que solo está disponible dentro del Box, tengo que
-        //enviar ese modificador ya PREPARADO al elemento como argumento
-        FabDialog(Modifier.align(Alignment.BottomEnd), tasksViewModel)
+    when(uiState) {
+        is TasksUiState.Error -> {}
+        TasksUiState.Loading -> { CircularProgressIndicator() }
+        is TasksUiState.Success -> {
+            /* VIDEO 120: Conectando StateFlow con Screen (MIN 3:30)
+            * Debido al código anterior, ya no es necesario el BOX después del WHEN. AHORA SOLO PINTAREMOS
+            * LA PANTALLA CUANDO HAYA DATOS :), ES DECIR, CUANDO ESTEMOS EN SUCCESS */
+            Box(modifier = Modifier.fillMaxSize()) {
+                AddTasksDialog(
+                    show = showDialog,
+                    onDismiss = { tasksViewModel.onDialogClose() },
+                    onTaskAdded = { tasksViewModel.onTasksCreated(it) })
 
-        //VIDEO #113: Creating the tasks
-        TasksList(tasksViewModel)
+                //Recordar que si quiero usar un atributo que solo está disponible dentro del Box, tengo que
+                //enviar ese modificador ya PREPARADO al elemento como argumento
+                FabDialog(Modifier.align(Alignment.BottomEnd), tasksViewModel)
+                TasksList( (uiState as TasksUiState.Success).tasks, tasksViewModel )
+            }
+        }
     }
 }
 
 //VIDEO #113: Creating the tasks
 @Composable
-fun TasksList(tasksViewModel: TasksViewModel) {
+fun TasksList(tasks: List<TaskModel>, tasksViewModel: TasksViewModel) {
 
-    val myTasks: List<TaskModel> = tasksViewModel.tasks
+    /* VIDEO 120: Conectando StateFlow con Screen
+        * Vamos a eliminar myTasks, ya que estamos llamando los ítems desde Flow, los datos serán
+        * siempre los de la DB*/
+
+    //val myTasks: List<TaskModel> = tasksViewModel.tasks
 
     LazyColumn {
         //Crea un ítem por cada uno de los objetos de esta lista (myTasks)
@@ -71,7 +101,7 @@ fun TasksList(tasksViewModel: TasksViewModel) {
         del Recycler ya que este le cuesta saber cual item es cada uno. Como sabe bien qué objeto es
          cada uno. Por eso agregamos la propiedad key con el id correspondiente. Al escribir "it.id"
          estamos optimizando el ReclyclerView*/
-        items(myTasks, key = { it.id }) { task ->
+        items(tasks, key = { it.id }) { task ->
             ItemTask(taskModel = task, tasksViewModel = tasksViewModel)
         }
 
